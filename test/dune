@@ -1,0 +1,9 @@
+(alias
+  (name runtest)
+  (action
+    (chdir %{workspace_root}
+        (run %{ocamlopt} -plugin %{dep:../opaqueness/opaqueness.cmxs}
+	%{dep:opaque.mli})
+     )
+  )
+)

@@ -1,0 +1,5 @@
+(library
+	(name opaqueness)
+	(public_name ocaml-plugin-opaqueness)
+	(libraries compiler-libs)
+)

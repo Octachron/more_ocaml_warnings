@@ -22,3 +22,7 @@ end
 module type c = sig type t end
 
 module M: c
+
+type t1 and t2
+
+val f: unit -> t1 * t2

@@ -2,7 +2,8 @@
   (name runtest)
   (action
     (chdir %{workspace_root}
-        (run %{ocamlopt} -plugin %{dep:../opaqueness/opaqueness.cmxs}
+        (run %{ocamlopt} -color always
+	     -plugin %{dep:../opaqueness/opaqueness.cmxs}
 	%{dep:opaque.mli})
      )
   )

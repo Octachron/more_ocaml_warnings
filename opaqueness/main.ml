@@ -1,5 +1,27 @@
-let debug fmt = Format.ifprintf Format.err_formatter
+let debug fmt = Format.fprintf Format.err_formatter
     ("@[debug:@ " ^^ fmt ^^ "@]@.")
+
+module Print = struct
+
+  let print_main ppf =
+    Misc.Color.setup !Clflags.color;
+    Format.fprintf ppf
+      "@[@{<warning>Warning [opaqueness]:@}@ \
+       some abstract types cannot be constructed@]@,"
+
+  let print_sub ppf (loc,id) =
+    Format.fprintf ppf
+      "%a@ @[Type @{<warning>%s@} cannot be constructed@]"
+      Location.print_loc loc (Ident.name id)
+
+  let print_subs =
+    Format.pp_print_list
+      ~pp_sep:(fun ppf () -> Format.fprintf ppf "@,")
+      print_sub
+
+  let warning l =
+    Format.eprintf "@[<v>%t%a@]@." print_main print_subs l
+end
 
 module Hypergraph = struct
   type vertex = Ident.t
@@ -41,14 +63,15 @@ module Hypergraph = struct
     if edge = Edge.empty then remove_vertices [vertex] tbl
     else add_edge_simple vertex edge tbl
 
-  let add_arrow ls graph =
+  let add_arrow (res,ls) graph =
     let rec filter edge = function
-      | [] -> ()
-      | [t] -> if Hashtbl.mem graph t then add_edge graph t edge else ()
+      | [] ->  add_edge graph res edge
       | arg :: q ->
         let edge = if Hashtbl.mem graph arg then Edge.add arg edge else edge in
         filter edge q in
-    filter Edge.empty ls
+    if Hashtbl.mem graph res then
+      filter Edge.empty ls
+    else ()
 
   let unreachable tbl = Hashtbl.fold (fun key info x ->
       (info.loc, key) :: x) tbl []
@@ -69,22 +92,54 @@ module type iter = sig
 
 module type arg = sig
   include TypedtreeIter.IteratorArgument
-  val init: Location.t -> unit
 end
 
-let pp_ident ppf s = Format.fprintf ppf "%s" (Ident.name s)
-
-let subwarn (loc,id) =
-  Location.errorf ~loc "type %a cannot be constructed" pp_ident id
-
-let warn loc = function
+let warn _loc = function
   | [] -> ()
-  | l ->
-    Location.report_error Format.err_formatter @@
-    Location.errorf ~loc ~sub:(List.map subwarn l)
-      "some abstract types cannot be constructed"
+  | l -> Print.warning l
 
-module Arg: arg = struct
+module Extract = struct
+  open Types
+
+  let rec arrow x = match x.desc with
+    | Tarrow (_,x,y,_) ->
+      let res, args = arrow y in
+      res, x :: args
+    | _ -> x, []
+
+
+  let bind f l = List.fold_right (fun x acc -> (f x) @ acc) l []
+  let ( >>= ) l f = bind f l
+
+  let rec typ x = match x.desc with
+    | Tconstr (Path.Pident p,_,_cts) -> [p]
+
+    | Tconstr (p,_,_cts) ->
+      debug "Seen %s" (Path.name p);
+      [] (* ? *)
+
+    | Ttuple ct -> ct >>= typ
+
+    | Tlink ct | Tsubst ct -> typ ct
+
+    | Tpoly _
+    | Tvar _ | Tunivar _
+    | Tnil -> []
+
+    (* not yet implemented *)
+    | Tvariant _ -> []
+    | Tarrow _ -> []
+    | Tfield _ -> []
+    | Tobject _ -> []
+    | Tpackage _ -> []
+
+  let arrow_typ ty =
+    let res, args = arrow ty in
+    let args = args >>= typ in
+    List.map (fun x -> x, args) (typ res)
+end
+
+module Data = struct
 
   type data = { mutable count: int; loc: Location.t; graph: Hypergraph.t }
   type elt =
@@ -96,7 +151,6 @@ module Arg: arg = struct
 
   let init loc = state := [On { count = 0; loc; graph = Hypergraph.init () }]
 
-  include TypedtreeIter.DefaultIteratorArgument
 
   let _update f = match !state with
     | [] -> ()
@@ -145,12 +199,75 @@ module Arg: arg = struct
     let push_mt () =
     debug "Entering analysis: mt";
     state := Neg :: !state
+end
 
-  let enter_signature _ = push Location.none
+module TypesIter = struct
+
+  open Types
+  open Data
+  let value_description id ty =
+    debug "val %a" Ident.print id;
+    ty
+    |> Extract.arrow_typ
+    |> List.iter (fun x -> mutate_graph (Hypergraph.add_arrow x) )
+
+  let decl id loc kind manifest =
+    if kind &&  manifest = None then
+      debug "abstract";
+      mutate_graph (Hypergraph.add_vertex loc id)
+
+  let item = function
+    | Sig_value (id, vd) ->
+      debug "Types.val";
+      value_description id vd.val_type
+    | Sig_type (id,td,_) ->
+      debug "Types.type";
+      decl id td.type_loc (td.type_kind=Type_abstract) td.type_manifest
+    | Sig_typext _ ->  ()
+
+    | Sig_module _ -> ()
+    | Sig_modtype _ -> ()
+    | Sig_class _ -> ()
+    | Sig_class_type _ -> ()
+
+  let signature s =  List.iter item s; ignore (pop ())
+
+end
+
+module Arg: arg = struct
+
+  open Data
+  include TypedtreeIter.DefaultIteratorArgument
+
+
+  let scrape loc env ty =
+    debug "scrape";
+    let ty = Env.scrape_alias env  ty in
+    begin match ty with
+      | Mty_signature s ->
+        debug "scrape successful";
+        push loc;TypesIter.signature s
+      | _ -> ()
+    end
+
+  let enter_signature_item s = match s.sig_desc with
+    | Tsig_module {md_type = { mty_desc = Tmty_signature _; _ }; _ }  ->
+      enter_signature_item s
+    | Tsig_module  m  ->
+      scrape s.sig_loc s.sig_env m.md_type.mty_type
+    | _ -> enter_signature_item s
+
+  let enter_signature (_s:signature) = push Location.none
   let enter_module_expr modexp =
+    let env = modexp.mod_env in
     match modexp.mod_desc with
-    | Tmod_constraint (_, _, Tmodtype_explicit _ , _)
-    | Tmod_constraint (_,_, Tmodtype_implicit , _) -> push modexp.mod_loc
+    | Tmod_constraint (_, _, Tmodtype_explicit ty , _) ->
+      begin match ty.mty_desc with
+        | Tmty_signature _ -> push modexp.mod_loc
+        | _ -> scrape modexp.mod_loc env ty.mty_type
+      end
+    | Tmod_constraint (_,_, Tmodtype_implicit , _) ->
+      push modexp.mod_loc
     | _ -> ()
 
   let leave_module_expr modexp =
@@ -175,47 +292,12 @@ module Arg: arg = struct
 
   let enter_type_declaration (tyd:type_declaration) =
     debug "type %a" Ident.print tyd.typ_id;
-    match tyd.typ_kind, tyd.typ_manifest with
-    | Ttype_abstract, None ->
-      debug "abstract";
-      mutate_graph (Hypergraph.add_vertex tyd.typ_loc tyd.typ_id)
-    | _ -> ()
-
-  let rec extract_arrow x = match x.ctyp_desc with
-    | Ttyp_arrow (_,x,y) -> x :: extract_arrow y
-    | _ -> [x]
+    TypesIter.decl tyd.typ_id tyd.typ_loc
+      (tyd.typ_kind = Ttype_abstract) tyd.typ_manifest
 
 
-  let bind f l = List.fold_right (fun x acc -> (f x) @ acc) l []
-  let ( >>= ) l f = bind f l
-
-  let rec extract_typ x = match x.ctyp_desc with
-    | Ttyp_constr (Path.Pident p,_,_cts) -> [p]
-
-    | Ttyp_constr (p,_,_cts) ->
-      debug "Seen %s" (Path.name p);
-      [] (* ? *)
-
-    | Ttyp_tuple ct -> ct >>= extract_typ
-    | Ttyp_alias (ct,_) -> extract_typ ct
-    | Ttyp_poly (_,ct) -> extract_typ ct
-
-    | Ttyp_any -> []
-    | Ttyp_var _ -> []
-
-    (* not yet implemented *)
-    | Ttyp_variant _ -> []
-    | Ttyp_arrow _ -> []
-    | Ttyp_class _ -> []
-    | Ttyp_object _ -> []
-    | Ttyp_package _ -> []
-
-  let enter_value_description (x:value_description) =
-    debug "val %a" Ident.print x.val_id;
-    x.val_desc
-    |> extract_arrow
-    >>= extract_typ
-    |> (fun x -> mutate_graph (Hypergraph.add_arrow x) )
+  let enter_value_description s =
+    TypesIter.value_description s.val_id s.val_desc.ctyp_type
 
 
   let enter_module_type_declaration _ = push_mt ()
@@ -223,13 +305,13 @@ module Arg: arg = struct
 
 end
 
-module Iter = TypedtreeIter.MakeIterator(Arg)
+module Iter: iter = TypedtreeIter.MakeIterator(Arg)
 
 let str info ((s,_) as arg) =
-  Arg.init (Location.in_file info.Misc.sourcefile);
+  Data.init (Location.in_file info.Misc.sourcefile);
   Iter.iter_structure s; arg
 let sign info x =
-  Arg.init (Location.in_file info.Misc.sourcefile);
+  Data.init (Location.in_file info.Misc.sourcefile);
   Iter.iter_signature x;
   x
 

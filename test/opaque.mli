@@ -46,3 +46,6 @@ type field2
 
 val x: int -> <x:field>
 val w: <x:field2> -> field2
+
+type inner
+val fi: ( (unit -> inner) -> inner) -> inner

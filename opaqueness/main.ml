@@ -35,18 +35,17 @@ let early_warning loc {Hypergraph.graph; vertices} =
 module Extract = struct
   open Types
 
-  let rec arrow expand env x = match x.desc with
+  type 'a arrow = { res: 'a; args: 'a list }
+
+  let rec arrow expand env res = match res.desc with
     | Tarrow (_,x,y,_) ->
-      let res, args = arrow true env y in
-      res, x :: args
-    | Tconstr _ when not expand -> x, []
-    | Tconstr _  -> arrow false env (Ctype.expand_head env x)
-    | _ -> x, []
+      let r = arrow true env y in
+      { r with args = x :: r.args }
+    | Tconstr _ when not expand -> { res; args = [] }
+    | Tconstr _  -> arrow false env (Ctype.expand_head env res)
+    | _ -> { res; args = [] }
 
-  let arrow = arrow true
-
-
-  let rec typ x = match x.desc with
+  and typ env x = match x.desc with
     | Tconstr (Path.Pident p,_,_cts) ->
       debug "constr: %s" (Ident.name p);
       [Formula.Var p]
@@ -55,36 +54,38 @@ module Extract = struct
       debug "Seen %s" (Path.name p);
       [] (* ? *)
 
-    | Ttuple ct -> debug "tuple"; ct >>= typ
-    | Tpoly (ct, _) | Tlink ct | Tsubst ct -> typ ct
+    | Ttuple ct -> debug "tuple"; ct >>= typ env
+    | Tpoly (ct, _) | Tlink ct | Tsubst ct -> typ env ct
 
     | Tvar _ | Tunivar _
     | Tnil -> debug "variables"; []
 
     (* not yet implemented *)
-    | Tvariant r -> [Formula.any (r.row_fields>>= row_field)]
-    | Tarrow _ -> debug "arrow"; []
+    | Tvariant r -> [Formula.any (r.row_fields>>= row_field env)]
+    | Tarrow _ ->
+      debug "inner arrow";
+      let r = arrow true env x in typ env r.res
     | Tfield (s,_,ty,rest) ->
       debug "field %s" s;
-      typ ty @ typ rest
+      typ env ty @ typ env rest
     | Tobject (ty, _c) (*when !c = None*) ->
       debug "object";
-      typ ty
+      typ env ty
     (*| Tobject _ -> []  ? *)
     | Tpackage _ -> []
 
-  and row_field (_, r) = match r with
-    | Rpresent (Some t) -> [Formula.all (typ t)]
+  and row_field env (_, r) = match r with
+    | Rpresent (Some t) -> [Formula.all (typ env t)]
     | Rpresent None | Rabsent -> []
     | Reither _ -> assert false
 
   let arrow_typ env ty =
-    let res, args = arrow env ty in
-    let args = args >>= typ in
+    let r = arrow true env ty in
+    let args = r.args >>= typ env in
     List.fold_left (fun l -> function
         | Formula.Var x -> (x, args) :: l
         | _ -> l
-      ) [] (typ res)
+      ) [] (typ env r.res)
 end
 
 module TypesIter = struct

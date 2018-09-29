@@ -1,3 +1,4 @@
+open Utils
 type vertex = Ident.t
 
 type edges = Ident.t Formula.t
@@ -39,7 +40,7 @@ let rec remove_vertices vs tbl =
     remove_vertices !stack tbl
 
 let add_edge tbl vertex edge =
-  Utils.debug "Add edge:[%a]" pp_edge edge;
+  Utils.debug "Add edge: %a ⇒ %a" pp_edge edge pp_ident vertex;
   if edge = Formula.True then remove_vertices [vertex] tbl
   else add_edge_simple vertex edge tbl
 

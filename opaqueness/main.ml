@@ -1,104 +1,6 @@
 let debug fmt = Format.fprintf Format.err_formatter
     ("@[debug:@ " ^^ fmt ^^ "@]@.")
 
-module Print = struct
-
-  let print_main ppf =
-    Misc.Color.setup !Clflags.color;
-    Format.fprintf ppf
-      "@[@{<warning>Warning [opaqueness]:@}@ \
-       some abstract types cannot be constructed@]@,"
-
-  let print_sub ppf (loc,id) =
-    Format.fprintf ppf
-      "%a@ @[Type @{<warning>%s@} cannot be constructed@]"
-      Location.print_loc loc (Ident.name id)
-
-  let print_subs =
-    Format.pp_print_list
-      ~pp_sep:(fun ppf () -> Format.fprintf ppf "@,")
-      print_sub
-
-  let warning l =
-    Format.eprintf "@[<v>%t%a@]@." print_main print_subs l
-end
-
-module Hypergraph = struct
-  type vertex = Ident.t
-  module Edge = Set.Make(struct type t = vertex let compare = compare end)
-  type edge = Edge.t
-  type status =
-    | Unknown
-    | Connected
-    | Marked
-  type info =
-    { loc: Location.t; edges: edge list; status: status }
-  type t = (vertex, info) Hashtbl.t
-
-  let init () = Hashtbl.create 20
-
-  let add_vertex loc v tbl =
-    Hashtbl.replace tbl v {loc; edges = []; status = Unknown}
-  let add_edge_simple v edge tbl =
-    match Hashtbl.find_opt tbl v with
-    | None -> ()
-    | Some info ->
-      Hashtbl.replace tbl v
-        { info with status = max Connected info.status;
-                    edges =  edge :: info.edges }
-
-
-  let rec remove_vertices vs tbl =
-    match vs with
-    | [] -> ()
-    | v :: q ->
-      Hashtbl.remove tbl v;
-      let stack = ref q in
-        Hashtbl.filter_map_inplace (fun _w info ->
-              let edges = List.map (Edge.remove v) info.edges in
-              if info.status = Connected
-              && List.exists (fun e -> e = Edge.empty) edges then
-                (stack := v :: !stack; None)
-              else Some { info with edges }
-          ) tbl;
-        remove_vertices !stack tbl
-
-
-  let mark_abstract id tbl =
-    Hashtbl.replace tbl id { (Hashtbl.find tbl id) with status = Marked }
-
-  let add_edge tbl vertex edge =
-    if edge = Edge.empty then remove_vertices [vertex] tbl
-    else add_edge_simple vertex edge tbl
-
-  let add_arrow (res,ls) graph =
-    let rec filter edge = function
-      | [] ->  add_edge graph res edge
-      | arg :: q ->
-        let edge = if Hashtbl.mem graph arg then Edge.add arg edge else edge in
-        filter edge q in
-    if Hashtbl.mem graph res then
-      filter Edge.empty ls
-    else ()
-
-  type view = { graph:t; mutable vertices: (Location.t * vertex) list }
-
-  let add_arrow (res,ls) view =
-    add_arrow (res,ls) view.graph
-
-  let add_abstract loc id view =
-    add_vertex loc id view.graph;
-    view.vertices <- (loc,id) :: view.vertices
-
-  let unreachable tbl = Hashtbl.fold (fun key info l ->
-      if info.status = Marked then
-        l
-      else
-        (info.loc, key) :: l
-    ) tbl []
-
-end
-
 open Typedtree
 module type iter = sig
       val iter_structure : structure -> unit
@@ -117,12 +19,12 @@ end
 
 let warn _loc = function
   | [] -> ()
-  | l -> Print.warning l
+  | l -> Printer.warning l
 
-let early_error loc {Hypergraph.graph; vertices} =
+let early_warning loc {Hypergraph.graph; vertices} =
   let early acc (_,id as x) =
     if Hashtbl.mem graph id then begin
-      Hypergraph.mark_abstract id graph;
+      Hypergraph.mark id graph;
       x :: acc
     end
     else
@@ -172,84 +74,19 @@ module Extract = struct
     List.map (fun x -> x, args) (typ res)
 end
 
-module Data = struct
-
-  type info =
-    { id: Ident.t;
-      loc: Location.t;
-      view: Hypergraph.view
-    }
-  type elt =
-    | Signature of info
-    | Module_type
-
-  let state = ref []
-
-  let init id loc = state :=
-      [Signature {
-          id;
-          loc;
-          view = { graph = Hypergraph.init (); vertices = []}
-        }
-      ]
-
-
-  let _update f = match !state with
-    | [] -> ()
-    | a :: q -> state := f a :: q
-
-  let mutate f = match !state with
-    | [] -> ()
-    | Module_type :: _ -> ()
-    | Signature x :: _ -> f x.view
-
-  let in_modtype () = match !state with
-    | Module_type :: _ -> true
-    | _ -> false
-
-  let pop () =
-    match !state with
-    | [] -> assert false
-    | x :: q ->
-      state := q;
-      match x with
-      | Signature x ->
-        debug "pop: %d" (List.length q );
-        Some x
-      | Module_type ->
-        debug "pop: mt %d" (List.length q );
-        None
-
-  let push id loc () =
-    debug "Entering analysis: %s |%d+1" (Ident.name id) (List.length !state);
-    match !state with
-    | x :: _ ->
-      let graph = match x with
-        | Module_type -> Hypergraph.init ()
-        | Signature s -> s.view.graph in
-      let view = { Hypergraph.graph; vertices = [] } in
-      state := Signature { id; loc; view } :: !state
-    | [] -> assert false
-
-    let push_mt () =
-    debug "Entering analysis: mt| %d + 1" (List.length !state);
-    state := Module_type :: !state
-end
-
 module TypesIter = struct
 
   open Types
-  open Data
   let value_description id ty =
     debug "val %a" Ident.print id;
     ty
     |> Extract.arrow_typ
-    |> List.iter (fun x -> mutate (Hypergraph.add_arrow x) )
+    |> List.iter (fun x -> State.mutate (Hypergraph.add_arrow x) )
 
   let decl id loc kind manifest =
     if kind &&  manifest = None then
       debug "abstract";
-      mutate (Hypergraph.add_abstract loc id)
+      State.mutate (Hypergraph.add_abstract loc id)
 
   let item = function
     | Sig_value (id, vd) ->
@@ -271,7 +108,6 @@ end
 
 module Arg = struct
 
-  open Data
   include TypedtreeIter.DefaultIteratorArgument
 
   let scrape env ty =
@@ -286,15 +122,15 @@ module Arg = struct
 
   let enter_signature_item s = match s.sig_desc with
     | Tsig_module ({md_type = { mty_desc = Tmty_signature _; _}; _ } as m)  ->
-      push m.md_id m.md_loc ();
+      State.push m.md_id m.md_loc ();
       enter_signature_item s
     | Tsig_module  m  ->
-      push m.md_id m.md_loc ();
+      State.push m.md_id m.md_loc ();
       scrape s.sig_env m.md_type.mty_type
     | _ -> enter_signature_item s
 
 
-  let last () = match !state with
+  let last () = match State.get () with
     | Module_type :: _ -> debug "Module type before"; true
     | [] -> debug "last"; true
     | _ -> false
@@ -302,14 +138,14 @@ module Arg = struct
 
   let warning h =
     if last () then
-      warn h.loc (Hypergraph.unreachable h.view.Hypergraph.graph)
+      warn h.State.loc (Hypergraph.unreachable h.view.Hypergraph.graph)
     else
-      early_error h.loc h.view
+      early_warning h.loc h.view
 
   let leave_signature_item s =
     match s.sig_desc with
     | Tsig_module m ->
-      begin match pop () with
+      begin match State.pop () with
         | None -> debug "Leaving signature: None";
         | Some h ->
           debug "Leaving signature: %s -> analysis" (Ident.name m.md_id);
@@ -317,7 +153,7 @@ module Arg = struct
       end
     | _ -> ()
 
-  let leave_signature _ = match !state with
+  let leave_signature _ = match State.get () with
     | [Signature last] ->
       warn last.loc (Hypergraph.unreachable last.view.graph)
     | _ -> ()
@@ -359,8 +195,8 @@ module Arg = struct
     TypesIter.value_description s.val_id s.val_desc.ctyp_type
 
 
-  let enter_module_type_declaration _ = push_mt ()
-  let leave_module_type_declaration _ = ignore @@ pop ()
+  let enter_module_type_declaration _ = State.push_mt ()
+  let leave_module_type_declaration _ = ignore @@ State.pop ()
 
 end
 
@@ -369,12 +205,12 @@ module Iter: iter = TypedtreeIter.MakeIterator(Arg)
 let str info ((s,_) as arg) =
   let src = info.Misc.sourcefile in
   let id = Ident.create src in
-  Data.init id (Location.in_file src);
+  State.init id (Location.in_file src);
   Iter.iter_structure s; arg
 let sign info x =
   let src = info.Misc.sourcefile in
   let id = Ident.create src in
-  Data.init id (Location.in_file src);
+  State.init id (Location.in_file src);
   Iter.iter_signature x;
   x
 

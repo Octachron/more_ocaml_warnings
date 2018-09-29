@@ -5,6 +5,7 @@ let debug fmt = Format.fprintf Format.err_formatter
     ("@[debug:@ " ^^ fmt ^^ "@]@.")
 
 
+let echo pre pp x = debug (pre ^^ "%a") pp x; x
 let capture pp f x =
   let y = f x in
   debug "%a => %a" pp x pp y;

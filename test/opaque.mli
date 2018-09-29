@@ -50,3 +50,18 @@ val w: <x:field2> -> field2
 type inner and inner_ok
 val fi: ( (unit -> inner) -> inner) -> inner
 val fi: ( (unit -> inner_ok) -> unit) -> inner_ok
+
+type either_ok and either
+
+val either: (either_ok, bool) result -> either_ok
+val either' : (either, either) result -> either
+
+type ('a,'b) re = { x: 'a; y: 'b }
+type prod
+val prod: (prod, int) re -> prod
+
+type recursive
+val f: (recursive, recursive) result -> recursive
+
+type recursive_ok
+val f: (recursive_ok, recursive_ok list) result -> recursive_ok

@@ -8,7 +8,7 @@ type 'a t =
   | False
 
 let (&&&) x y = match x, y with
-  | False, _ -> False
+  | False, _ | _, False -> False
   | True, y | y, True -> y
   | And a, And b -> And (a @ b)
   | And a, y | y, And a -> And (y :: a)
@@ -17,7 +17,7 @@ let (&&&) x y = match x, y with
 
 let (|||) x y = match x, y with
   | False, x | x, False -> x
-  | True, _ -> True
+  | True, _ | _, True -> True
   | Or a, Or b -> Or (a @ b)
   | Or a, b | b, Or a -> Or (b :: a)
   | x, y when x = y -> x

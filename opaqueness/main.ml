@@ -32,60 +32,97 @@ let early_warning loc {Hypergraph.graph; vertices} =
 
 
 
+
 module Extract = struct
   open Types
 
   type 'a arrow = { res: 'a; args: 'a list }
+  let is_abstract ty =
+    ty.type_kind = Type_abstract
+    && ty.type_manifest = None
 
   let rec arrow expand env res = match res.desc with
     | Tarrow (_,x,y,_) ->
       let r = arrow true env y in
       { r with args = x :: r.args }
     | Tconstr _ when not expand -> { res; args = [] }
-    | Tconstr _  -> arrow false env (Ctype.expand_head env res)
+    | Tconstr _  -> arrow false env (Ctype.full_expand env res)
     | _ -> { res; args = [] }
 
-  and typ env x = match x.desc with
-    | Tconstr (Path.Pident p,_,_cts) ->
-      debug "constr: %s" (Ident.name p);
-      [Formula.Var p]
-
-    | Tconstr (p,_,_cts) ->
+  and typ visited env x = match x.desc with
+    | Tconstr (Path.Pident p,params,_cts) ->
+      if List.mem x visited then [Formula.False] else
+      begin try
+          let t = Env.find_type (Path.Pident p) env in
+          if is_abstract t then
+            (debug "constr: %s" (Ident.name p);
+             [Formula.Var p])
+          else
+            [deconstruct (x :: visited) env params t]
+        with Not_found -> []
+      end
+    | Tconstr (p,params,_cts) ->
       debug "Seen %s" (Path.name p);
-      [] (* ? *)
+      let t = Env.find_type p env in
+      debug "deconstructing %s" (Path.name p);
+      [deconstruct visited env params t]
 
-    | Ttuple ct -> debug "tuple"; ct >>= typ env
-    | Tpoly (ct, _) | Tlink ct | Tsubst ct -> typ env ct
+    | Ttuple ct -> debug "tuple"; ct >>= typ visited env
+    | Tpoly (ct, _) | Tlink ct | Tsubst ct -> typ visited env ct
 
     | Tvar _ | Tunivar _
     | Tnil -> debug "variables"; []
 
-    (* not yet implemented *)
-    | Tvariant r -> [Formula.any (r.row_fields>>= row_field env)]
+    | Tvariant r -> [Formula.any (r.row_fields>>= row_field visited env)]
+
     | Tarrow _ ->
       debug "inner arrow";
-      let r = arrow true env x in typ env r.res
+      let r = arrow true env x in typ visited env r.res
     | Tfield (s,_,ty,rest) ->
       debug "field %s" s;
-      typ env ty @ typ env rest
+      typ visited env ty @ typ visited env rest
     | Tobject (ty, _c) (*when !c = None*) ->
       debug "object";
-      typ env ty
+      typ visited env ty
+
+    (* not yet implemented *)
     (*| Tobject _ -> []  ? *)
     | Tpackage _ -> []
 
-  and row_field env (_, r) = match r with
-    | Rpresent (Some t) -> [Formula.all (typ env t)]
+  and row_field visited env (_, r) = match r with
+    | Rpresent (Some t) -> [Formula.all (typ visited env t)]
     | Rpresent None | Rabsent -> []
     | Reither _ -> assert false
 
+  and deconstruct (visited: _ list) (env:Env.t) params tyd =
+    let back = Btype.snapshot () in
+    List.iter2 (fun x y -> Ctype.unify env x y) params tyd.type_params;
+    let f =
+      match tyd.type_kind with
+      | Type_record (l,_) -> labels visited env l
+      | Type_variant l ->
+        let constr (x:constructor_declaration) =
+          debug "constructor: %a" pp_ident x.cd_id;
+          echo "arg, " Hypergraph.pp_edge @@
+            match x.cd_args with
+            | Cstr_tuple t -> Formula.all (t >>= typ visited env)
+            | Cstr_record ld-> labels visited env ld in
+        Formula.any (List.map constr l)
+      | Type_abstract | Type_open -> True in
+    Btype.backtrack back;
+    debug "Deconstructing to %a" Hypergraph.pp_edge f;
+    f
+
+  and labels visited env l =
+    Formula.all (bind (fun x -> typ visited env x.ld_type) l)
+
   let arrow_typ env ty =
     let r = arrow true env ty in
-    let args = r.args >>= typ env in
+    let args = r.args >>= typ [] env in
     List.fold_left (fun l -> function
         | Formula.Var x -> (x, args) :: l
         | _ -> l
-      ) [] (typ env r.res)
+      ) [] (typ [] env r.res)
 end
 
 module TypesIter = struct

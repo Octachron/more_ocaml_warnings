@@ -36,12 +36,15 @@ let early_warning loc {Hypergraph.graph; vertices} =
 module Extract = struct
   open Types
 
-  let rec arrow x = match x.desc with
+  let rec arrow expand env x = match x.desc with
     | Tarrow (_,x,y,_) ->
-      let res, args = arrow y in
+      let res, args = arrow true env y in
       res, x :: args
+    | Tconstr _ when not expand -> x, []
+    | Tconstr _  -> arrow false env (Ctype.expand_head env x)
     | _ -> x, []
 
+  let arrow = arrow true
 
   let bind f l = List.fold_right (fun x acc -> (f x) @ acc) l []
   let ( >>= ) l f = bind f l
@@ -68,8 +71,8 @@ module Extract = struct
     | Tobject _ -> []
     | Tpackage _ -> []
 
-  let arrow_typ ty =
-    let res, args = arrow ty in
+  let arrow_typ env ty =
+    let res, args = arrow env ty in
     let args = args >>= typ in
     List.map (fun x -> x, args) (typ res)
 end
@@ -77,21 +80,23 @@ end
 module TypesIter = struct
 
   open Types
-  let value_description id ty =
+  let value_description env id ty =
     debug "val %a" Ident.print id;
     ty
-    |> Extract.arrow_typ
+    |> Extract.arrow_typ env
     |> List.iter (fun x -> State.mutate (Hypergraph.add_arrow x) )
 
   let decl id loc kind manifest =
     if kind &&  manifest = None then
-      debug "abstract";
-      State.mutate (Hypergraph.add_abstract loc id)
+      (
+        debug "abstract: %s" (Ident.name id);
+        State.mutate (Hypergraph.add_abstract loc id)
+      )
 
-  let item = function
+  let item env = function
     | Sig_value (id, vd) ->
       debug "Types.val";
-      value_description id vd.val_type
+      value_description env  id vd.val_type
     | Sig_type (id,td,_) ->
       debug "Types.type";
       decl id td.type_loc (td.type_kind=Type_abstract) td.type_manifest
@@ -102,7 +107,7 @@ module TypesIter = struct
     | Sig_class _ -> ()
     | Sig_class_type _ -> ()
 
-  let signature s =  List.iter item s
+  let signature env s =  List.iter (item env) s
 
 end
 
@@ -116,7 +121,7 @@ module Arg = struct
     begin match ty with
       | Mty_signature s ->
         debug "scrape successful";
-        TypesIter.signature s
+        TypesIter.signature env s
       | _ -> ()
     end
 
@@ -192,7 +197,8 @@ module Arg = struct
 
 
   let enter_value_description s =
-    TypesIter.value_description s.val_id s.val_desc.ctyp_type
+    TypesIter.value_description
+      s.val_desc.ctyp_env s.val_id s.val_desc.ctyp_type
 
 
   let enter_module_type_declaration _ = State.push_mt ()

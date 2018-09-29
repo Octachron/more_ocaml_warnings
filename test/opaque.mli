@@ -26,3 +26,9 @@ module M: c
 type t1 and t2
 
 val f: unit -> t1 * t2
+
+type 'a producer = unit -> 'a
+
+type produced
+
+val x: produced producer

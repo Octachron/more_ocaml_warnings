@@ -29,23 +29,25 @@ let pp_edge = pp_formula pp_ident
 let rec simplify assign = function
   | True | False as x -> x
   | And [] | Or [] -> True
-  | And [x] -> x
-  | Or [x] -> x
+  | And [x] -> simplify assign x
+  | Or (Or l :: q ) -> simplify assign (Or (l @ q))
+  | And (And l :: q) -> simplify assign (And (l @ q))
+  | Or [x] -> simplify assign x
   | And l -> simplify_and assign [] l
   | Or l -> simplify_or assign [] l
   | Var x as v ->
     match assign x with
     | None -> v
     | Some x -> x
-and simplify_list max absorbing best f rest  = function
-  | [] -> if best then max else And rest
+and simplify_list e zero constr f rest  = function
+  | [] -> if rest = [] then e else constr rest
   | x :: q ->
     let x = simplify f x in
-    if x = absorbing then absorbing
-    else if x = max then simplify_list max absorbing true f (x::rest) q
-    else simplify_list max absorbing false f (x::rest) q
-and simplify_and f = simplify_list True False true f
-and simplify_or f = simplify_list False True true f
+    if x = zero then zero
+    else if x = e then simplify_list e zero constr f (rest) q
+    else simplify_list e zero constr f (x::rest) q
+and simplify_and f = simplify_list True False (fun x -> And x) f
+and simplify_or f = simplify_list False True (fun x -> Or x) f
 
 let simplify f x =
   let y = simplify f x in
@@ -98,14 +100,13 @@ let add_edge tbl vertex edge =
   else add_edge_simple vertex edge tbl
 
 let add_arrow (res,ls) graph =
-  let rec filter edge = function
-    | [] ->  add_edge graph res (simplif @@ And edge)
-    | arg :: q ->
-      let edge = if Hashtbl.mem graph arg then Var arg::edge else edge in
-      filter edge q in
+  let ls = simplify
+      (fun arg ->
+         if Hashtbl.mem graph arg then None
+         else Some True
+      ) (And ls) in
   if Hashtbl.mem graph res then
-    filter [] ls
-  else ()
+    add_edge graph res (simplif ls);
 
 type view = { graph:t; mutable vertices: (Location.t * vertex) list }
 

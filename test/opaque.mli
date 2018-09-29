@@ -32,3 +32,10 @@ type 'a producer = unit -> 'a
 type produced
 
 val x: produced producer
+
+type after_or
+
+val f: [ `X of int | `Y of after_or ] -> after_or
+
+type lock1 and lock2
+val f: [ `X of lock1 | `Y of lock2 ] -> lock1 * lock2

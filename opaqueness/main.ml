@@ -50,7 +50,7 @@ module Extract = struct
   let ( >>= ) l f = bind f l
 
   let rec typ x = match x.desc with
-    | Tconstr (Path.Pident p,_,_cts) -> [p]
+    | Tconstr (Path.Pident p,_,_cts) -> [Hypergraph.Var p]
 
     | Tconstr (p,_,_cts) ->
       debug "Seen %s" (Path.name p);
@@ -65,16 +65,24 @@ module Extract = struct
     | Tnil -> []
 
     (* not yet implemented *)
-    | Tvariant _ -> []
+    | Tvariant r -> [Or (r.row_fields>>= row_field)]
     | Tarrow _ -> []
     | Tfield _ -> []
     | Tobject _ -> []
     | Tpackage _ -> []
 
+  and row_field (_, r) = match r with
+    | Rpresent (Some t) -> typ t
+    | Rpresent None | Rabsent -> []
+    | Reither _ -> assert false
+  
   let arrow_typ env ty =
     let res, args = arrow env ty in
     let args = args >>= typ in
-    List.map (fun x -> x, args) (typ res)
+    List.fold_left (fun l -> function
+        | Hypergraph.Var x -> (x, args) :: l
+        | _ -> l
+      ) [] (typ res)
 end
 
 module TypesIter = struct

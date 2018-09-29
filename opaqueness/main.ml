@@ -27,20 +27,25 @@ module Hypergraph = struct
   type vertex = Ident.t
   module Edge = Set.Make(struct type t = vertex let compare = compare end)
   type edge = Edge.t
+  type status =
+    | Unknown
+    | Connected
+    | Marked
   type info =
-    { loc: Location.t; edges: edge list; connected: bool }
+    { loc: Location.t; edges: edge list; status: status }
   type t = (vertex, info) Hashtbl.t
 
   let init () = Hashtbl.create 20
 
   let add_vertex loc v tbl =
-    Hashtbl.replace tbl v {loc; edges = []; connected = false}
+    Hashtbl.replace tbl v {loc; edges = []; status = Unknown}
   let add_edge_simple v edge tbl =
     match Hashtbl.find_opt tbl v with
     | None -> ()
     | Some info ->
       Hashtbl.replace tbl v
-        { info with connected = true; edges =  edge :: info.edges }
+        { info with status = max Connected info.status;
+                    edges =  edge :: info.edges }
 
 
   let rec remove_vertices vs tbl =
@@ -51,13 +56,16 @@ module Hypergraph = struct
       let stack = ref q in
         Hashtbl.filter_map_inplace (fun _w info ->
               let edges = List.map (Edge.remove v) info.edges in
-              if info.connected
+              if info.status = Connected
               && List.exists (fun e -> e = Edge.empty) edges then
                 (stack := v :: !stack; None)
               else Some { info with edges }
           ) tbl;
         remove_vertices !stack tbl
 
+
+  let mark_abstract id tbl =
+    Hashtbl.replace tbl id { (Hashtbl.find tbl id) with status = Marked }
 
   let add_edge tbl vertex edge =
     if edge = Edge.empty then remove_vertices [vertex] tbl
@@ -73,8 +81,21 @@ module Hypergraph = struct
       filter Edge.empty ls
     else ()
 
-  let unreachable tbl = Hashtbl.fold (fun key info x ->
-      (info.loc, key) :: x) tbl []
+  type view = { graph:t; mutable vertices: (Location.t * vertex) list }
+
+  let add_arrow (res,ls) view =
+    add_arrow (res,ls) view.graph
+
+  let add_abstract loc id view =
+    add_vertex loc id view.graph;
+    view.vertices <- (loc,id) :: view.vertices
+
+  let unreachable tbl = Hashtbl.fold (fun key info l ->
+      if info.status = Marked then
+        l
+      else
+        (info.loc, key) :: l
+    ) tbl []
 
 end
 
@@ -97,6 +118,18 @@ end
 let warn _loc = function
   | [] -> ()
   | l -> Print.warning l
+
+let early_error loc {Hypergraph.graph; vertices} =
+  let early acc (_,id as x) =
+    if Hashtbl.mem graph id then begin
+      Hypergraph.mark_abstract id graph;
+      x :: acc
+    end
+    else
+      acc in
+  List.fold_left early [] vertices |> warn loc
+
+
 
 module Extract = struct
   open Types
@@ -141,15 +174,24 @@ end
 
 module Data = struct
 
-  type data = { mutable count: int; loc: Location.t; graph: Hypergraph.t }
+  type info =
+    { id: Ident.t;
+      loc: Location.t;
+      view: Hypergraph.view
+    }
   type elt =
-    | On of data
-    | Neg
-    | Off
+    | Signature of info
+    | Module_type
 
   let state = ref []
 
-  let init loc = state := [On { count = 0; loc; graph = Hypergraph.init () }]
+  let init id loc = state :=
+      [Signature {
+          id;
+          loc;
+          view = { graph = Hypergraph.init (); vertices = []}
+        }
+      ]
 
 
   let _update f = match !state with
@@ -158,47 +200,40 @@ module Data = struct
 
   let mutate f = match !state with
     | [] -> ()
-    | (Off|Neg) :: _ -> ()
-    | On x :: _ -> f x
+    | Module_type :: _ -> ()
+    | Signature x :: _ -> f x.view
 
-  let mutate_graph f = mutate (fun x -> f x.graph)
-
-  let _in_modtype () = match !state with
-    | Off :: _ -> true
+  let in_modtype () = match !state with
+    | Module_type :: _ -> true
     | _ -> false
 
-  let pop () = match !state with
-    | [] -> assert false
-    | On a :: q ->
-      debug "pop %d" a.count;
-      if a.count = 1 then
-        (state := q; Some a) else
-        begin
-          a.count <- a.count - 1;
-          None
-        end
-    | (Off|Neg) :: _ -> None
-
-  let pop_mt () = match !state with
-    | [] -> assert false
-    | On _ :: _ -> assert false
-    | (Off|Neg) :: q ->
-      debug "Leaving module type declaration";
-      state := q
-
-  let push loc =
-    debug "Entering analysis: me";
+  let pop () =
     match !state with
-    | Off :: _ | [] ->
-      state := On { loc; count=1; graph = Hypergraph.init () } :: !state
-    | Neg :: q -> state := Off :: q
-    | On x :: _ ->
-      debug "Count %d" x.count;
-      x.count <- x.count + 1
+    | [] -> assert false
+    | x :: q ->
+      state := q;
+      match x with
+      | Signature x ->
+        debug "pop: %d" (List.length q );
+        Some x
+      | Module_type ->
+        debug "pop: mt %d" (List.length q );
+        None
+
+  let push id loc () =
+    debug "Entering analysis: %s |%d+1" (Ident.name id) (List.length !state);
+    match !state with
+    | x :: _ ->
+      let graph = match x with
+        | Module_type -> Hypergraph.init ()
+        | Signature s -> s.view.graph in
+      let view = { Hypergraph.graph; vertices = [] } in
+      state := Signature { id; loc; view } :: !state
+    | [] -> assert false
 
     let push_mt () =
-    debug "Entering analysis: mt";
-    state := Neg :: !state
+    debug "Entering analysis: mt| %d + 1" (List.length !state);
+    state := Module_type :: !state
 end
 
 module TypesIter = struct
@@ -209,12 +244,12 @@ module TypesIter = struct
     debug "val %a" Ident.print id;
     ty
     |> Extract.arrow_typ
-    |> List.iter (fun x -> mutate_graph (Hypergraph.add_arrow x) )
+    |> List.iter (fun x -> mutate (Hypergraph.add_arrow x) )
 
   let decl id loc kind manifest =
     if kind &&  manifest = None then
       debug "abstract";
-      mutate_graph (Hypergraph.add_vertex loc id)
+      mutate (Hypergraph.add_abstract loc id)
 
   let item = function
     | Sig_value (id, vd) ->
@@ -230,40 +265,70 @@ module TypesIter = struct
     | Sig_class _ -> ()
     | Sig_class_type _ -> ()
 
-  let signature s =  List.iter item s; ignore (pop ())
+  let signature s =  List.iter item s
 
 end
 
-module Arg: arg = struct
+module Arg = struct
 
   open Data
   include TypedtreeIter.DefaultIteratorArgument
 
-
-  let scrape loc env ty =
+  let scrape env ty =
     debug "scrape";
     let ty = Env.scrape_alias env  ty in
     begin match ty with
       | Mty_signature s ->
         debug "scrape successful";
-        push loc;TypesIter.signature s
+        TypesIter.signature s
       | _ -> ()
     end
 
   let enter_signature_item s = match s.sig_desc with
-    | Tsig_module {md_type = { mty_desc = Tmty_signature _; _ }; _ }  ->
+    | Tsig_module ({md_type = { mty_desc = Tmty_signature _; _}; _ } as m)  ->
+      push m.md_id m.md_loc ();
       enter_signature_item s
     | Tsig_module  m  ->
-      scrape s.sig_loc s.sig_env m.md_type.mty_type
+      push m.md_id m.md_loc ();
+      scrape s.sig_env m.md_type.mty_type
     | _ -> enter_signature_item s
 
-  let enter_signature (_s:signature) = push Location.none
+
+  let last () = match !state with
+    | Module_type :: _ -> debug "Module type before"; true
+    | [] -> debug "last"; true
+    | _ -> false
+
+
+  let warning h =
+    if last () then
+      warn h.loc (Hypergraph.unreachable h.view.Hypergraph.graph)
+    else
+      early_error h.loc h.view
+
+  let leave_signature_item s =
+    match s.sig_desc with
+    | Tsig_module m ->
+      begin match pop () with
+        | None -> debug "Leaving signature: None";
+        | Some h ->
+          debug "Leaving signature: %s -> analysis" (Ident.name m.md_id);
+          warning h
+      end
+    | _ -> ()
+
+  let leave_signature _ = match !state with
+    | [Signature last] ->
+      warn last.loc (Hypergraph.unreachable last.view.graph)
+    | _ -> ()
+
+  (*
   let enter_module_expr modexp =
     let env = modexp.mod_env in
     match modexp.mod_desc with
     | Tmod_constraint (_, _, Tmodtype_explicit ty , _) ->
       begin match ty.mty_desc with
-        | Tmty_signature _ -> push modexp.mod_loc
+        | Tmty_signature _ -> push modexp.mod_loc ()
         | _ -> scrape modexp.mod_loc env ty.mty_type
       end
     | Tmod_constraint (_,_, Tmodtype_implicit , _) ->
@@ -281,14 +346,8 @@ module Arg: arg = struct
           warn modexp.mod_loc unreachable
       end
     | _ -> ()
+*)
 
-  let leave_signature _s =
-    match pop () with
-    | None -> debug "Leaving signature: None";
-    | Some h ->
-      debug "Leaving signature: Analysis";
-      let unreachable = Hypergraph.unreachable h.graph in
-      warn h.loc unreachable
 
   let enter_type_declaration (tyd:type_declaration) =
     debug "type %a" Ident.print tyd.typ_id;
@@ -301,17 +360,21 @@ module Arg: arg = struct
 
 
   let enter_module_type_declaration _ = push_mt ()
-  let leave_module_type_declaration _ = pop_mt ()
+  let leave_module_type_declaration _ = ignore @@ pop ()
 
 end
 
 module Iter: iter = TypedtreeIter.MakeIterator(Arg)
 
 let str info ((s,_) as arg) =
-  Data.init (Location.in_file info.Misc.sourcefile);
+  let src = info.Misc.sourcefile in
+  let id = Ident.create src in
+  Data.init id (Location.in_file src);
   Iter.iter_structure s; arg
 let sign info x =
-  Data.init (Location.in_file info.Misc.sourcefile);
+  let src = info.Misc.sourcefile in
+  let id = Ident.create src in
+  Data.init id (Location.in_file src);
   Iter.iter_signature x;
   x
 

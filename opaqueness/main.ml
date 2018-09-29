@@ -1,5 +1,4 @@
-let debug fmt = Format.fprintf Format.err_formatter
-    ("@[debug:@ " ^^ fmt ^^ "@]@.")
+open Utils
 
 open Typedtree
 module type iter = sig
@@ -22,10 +21,10 @@ let warn _loc = function
   | l -> Printer.warning l
 
 let early_warning loc {Hypergraph.graph; vertices} =
-  let early acc (_,id as x) =
+  let early acc (loc,id) =
     if Hashtbl.mem graph id then begin
       Hypergraph.mark id graph;
-      x :: acc
+      (loc, id, Formula.free (Hashtbl.find graph id).edges)  :: acc
     end
     else
       acc in
@@ -46,8 +45,6 @@ module Extract = struct
 
   let arrow = arrow true
 
-  let bind f l = List.fold_right (fun x acc -> (f x) @ acc) l []
-  let ( >>= ) l f = bind f l
 
   let rec typ x = match x.desc with
     | Tconstr (Path.Pident p,_,_cts) ->

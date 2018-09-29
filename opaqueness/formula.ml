@@ -1,5 +1,4 @@
-let debug fmt = Format.fprintf Format.err_formatter
-    ("@[debug:@ " ^^ fmt ^^ "@]@.")
+open Utils
 
 type 'a t =
   | And of 'a t list
@@ -35,18 +34,24 @@ let rec any  = function
   | [x] -> x
   | x :: q -> x ||| any q
 
-let const s ppf = Format.fprintf ppf "%(%)" s
-let sep s ppf () = const s ppf
 
-let rec pp var ppf = function
-  | And l -> Format.fprintf ppf "@[[%a]@]"
-               (pp_list var @@ format_of_string "∧") l
-  | Or l -> Format.fprintf ppf "@[[%a]@]" (pp_list var "∨") l
-  | True -> const "true" ppf
-  | False -> const "false" ppf
+type precedence = M | P
+
+let rec pp precedence var ppf = function
+  | And l ->
+    Format.fprintf ppf "@[%a@]"
+      (pp_list M var @@ format_of_string "∧") l
+  | Or l ->
+    Format.fprintf ppf
+      (if precedence = M then "@[(%a)@]" else "@[%a@]")
+      (pp_list P var "∨") l
+  | True -> const "⊤" ppf
+  | False -> const "⊥" ppf
   | Var x -> var ppf x
-and pp_list var s =
-  Format.pp_print_list ~pp_sep:(sep @@ "@ "^^ s ^^"@ ") (pp var)
+and pp_list precedence var s =
+  Format.pp_print_list ~pp_sep:(sep @@ "@ "^^ s ^^"@ ") (pp precedence var)
+
+let pp x = pp P x
 
 let rec simplify assign = function
   | True | False as x -> x
@@ -65,3 +70,8 @@ and simplify_or f = simplify_list False (|||) f
 
 let simplif x = simplify (fun _ -> None) x
 let ( %=% ) value lit = simplify (fun x -> if x = value then Some lit else None)
+
+let rec free = function
+  | Var x -> [x]
+  | True | False -> []
+  | And l | Or l -> Utils.bind free l

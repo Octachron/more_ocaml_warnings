@@ -1,11 +1,3 @@
-let debug fmt = Format.fprintf Format.err_formatter
-    ("@[debug:@ " ^^ fmt ^^ "@]@.")
-
-let capture pp f x =
-  let y = f x in
-  debug "%a => %a" pp x pp y;
-  y
-
 type vertex = Ident.t
 
 type edges = Ident.t Formula.t
@@ -29,8 +21,7 @@ let add_edge_simple v edge tbl =
       { info with status = max Connected info.status;
                   edges =  Formula.( edge ||| info.edges ) }
 
-let pp_ident ppf id = Format.fprintf ppf "%s" (Ident.name id)
-let pp_edge = Formula.pp pp_ident
+let pp_edge = Formula.pp Utils.pp_ident
 
 let rec remove_vertices vs tbl =
   match vs with
@@ -39,7 +30,7 @@ let rec remove_vertices vs tbl =
     Hashtbl.remove tbl v;
     let stack = ref q in
     Hashtbl.filter_map_inplace (fun _w info ->
-        let edges = capture pp_edge Formula.(v %=% True) info.edges in
+        let edges = Utils.capture pp_edge Formula.(v %=% True) info.edges in
         if info.status = Connected
         && edges = Formula.True then
           (stack := v :: !stack; None)
@@ -48,18 +39,18 @@ let rec remove_vertices vs tbl =
     remove_vertices !stack tbl
 
 let add_edge tbl vertex edge =
-  debug "Add edge:[%a]" pp_edge edge;
+  Utils.debug "Add edge:[%a]" pp_edge edge;
   if edge = Formula.True then remove_vertices [vertex] tbl
   else add_edge_simple vertex edge tbl
 
 let add_arrow (res,ls) graph =
-  let ls = capture pp_edge (Formula.simplify
+  let ls = Utils.capture pp_edge (Formula.simplify
       (fun arg ->
          if Hashtbl.mem graph arg then None
          else Some True
-      )) (And ls) in
+      )) (Formula.all ls) in
   if Hashtbl.mem graph res then
-    add_edge graph res (capture pp_edge Formula.simplif ls);
+    add_edge graph res (Utils.capture pp_edge Formula.simplif ls);
 
 type view = { graph:t; mutable vertices: (Location.t * vertex) list }
 
@@ -77,5 +68,5 @@ let unreachable tbl = Hashtbl.fold (fun key info l ->
     if info.status = Marked then
       l
     else
-      (info.loc, key) :: l
+      (info.loc, key, Formula.free info.edges) :: l
   ) tbl []

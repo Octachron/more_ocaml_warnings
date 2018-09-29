@@ -8,26 +8,26 @@ let capture pp f x =
 
 type vertex = Ident.t
 
-type edge = Ident.t Formula.t
+type edges = Ident.t Formula.t
 type status =
   | Unknown
   | Connected
   | Marked
 type info =
-  { loc: Location.t; edges: edge list; status: status }
+  { loc: Location.t; edges: edges; status: status }
 type t = (vertex, info) Hashtbl.t
 
 let init () = Hashtbl.create 20
 
 let add_vertex loc v tbl =
-  Hashtbl.replace tbl v {loc; edges = []; status = Unknown}
+  Hashtbl.replace tbl v {loc; edges = False ; status = Unknown}
 let add_edge_simple v edge tbl =
   match Hashtbl.find_opt tbl v with
   | None -> ()
   | Some info ->
     Hashtbl.replace tbl v
       { info with status = max Connected info.status;
-                  edges =  edge :: info.edges }
+                  edges =  Formula.( edge ||| info.edges ) }
 
 let pp_ident ppf id = Format.fprintf ppf "%s" (Ident.name id)
 let pp_edge = Formula.pp pp_ident
@@ -39,10 +39,9 @@ let rec remove_vertices vs tbl =
     Hashtbl.remove tbl v;
     let stack = ref q in
     Hashtbl.filter_map_inplace (fun _w info ->
-        let simplify = capture pp_edge Formula.(v %=% True) in
-        let edges = List.map simplify info.edges in
+        let edges = capture pp_edge Formula.(v %=% True) info.edges in
         if info.status = Connected
-        && List.exists ( (=) Formula.True ) edges then
+        && edges = Formula.True then
           (stack := v :: !stack; None)
         else Some { info with edges }
       ) tbl;

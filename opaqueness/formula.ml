@@ -10,14 +10,14 @@ type 'a t =
 
 let (&&&) x y = match x, y with
   | False, _ -> False
-  | True, y -> y
+  | True, y | y, True -> y
   | And a, And b -> And (a @ b)
   | And a, y | y, And a -> And (y :: a)
   | x, y when x = y -> x
   | x, y -> And [x;y]
 
 let (|||) x y = match x, y with
-  | False, x -> x
+  | False, x | x, False -> x
   | True, _ -> True
   | Or a, Or b -> Or (a @ b)
   | Or a, b | b, Or a -> Or (b :: a)

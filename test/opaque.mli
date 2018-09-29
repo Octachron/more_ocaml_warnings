@@ -35,7 +35,14 @@ val x: produced producer
 
 type after_or
 
-val f: [ `X of int | `Y of after_or ] -> after_or
+val f: [ `X of int | `Y of after_or ]
+  -> [`W of float | `Z of after_or * char] -> after_or
 
 type lock1 and lock2
 val f: [ `X of lock1 | `Y of lock2 ] -> lock1 * lock2
+
+type field
+type field2
+
+val x: int -> <x:field>
+val w: <x:field2> -> field2

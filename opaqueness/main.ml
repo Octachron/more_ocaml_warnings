@@ -50,37 +50,42 @@ module Extract = struct
   let ( >>= ) l f = bind f l
 
   let rec typ x = match x.desc with
-    | Tconstr (Path.Pident p,_,_cts) -> [Hypergraph.Var p]
+    | Tconstr (Path.Pident p,_,_cts) ->
+      debug "constr: %s" (Ident.name p);
+      [Formula.Var p]
 
     | Tconstr (p,_,_cts) ->
       debug "Seen %s" (Path.name p);
       [] (* ? *)
 
-    | Ttuple ct -> ct >>= typ
+    | Ttuple ct -> debug "tuple"; ct >>= typ
+    | Tpoly (ct, _) | Tlink ct | Tsubst ct -> typ ct
 
-    | Tlink ct | Tsubst ct -> typ ct
-
-    | Tpoly _
     | Tvar _ | Tunivar _
-    | Tnil -> []
+    | Tnil -> debug "variables"; []
 
     (* not yet implemented *)
-    | Tvariant r -> [Or (r.row_fields>>= row_field)]
-    | Tarrow _ -> []
-    | Tfield _ -> []
-    | Tobject _ -> []
+    | Tvariant r -> [Formula.any (r.row_fields>>= row_field)]
+    | Tarrow _ -> debug "arrow"; []
+    | Tfield (s,_,ty,rest) ->
+      debug "field %s" s;
+      typ ty @ typ rest
+    | Tobject (ty, _c) (*when !c = None*) ->
+      debug "object";
+      typ ty
+    (*| Tobject _ -> []  ? *)
     | Tpackage _ -> []
 
   and row_field (_, r) = match r with
-    | Rpresent (Some t) -> typ t
+    | Rpresent (Some t) -> [Formula.all (typ t)]
     | Rpresent None | Rabsent -> []
     | Reither _ -> assert false
-  
+
   let arrow_typ env ty =
     let res, args = arrow env ty in
     let args = args >>= typ in
     List.fold_left (fun l -> function
-        | Hypergraph.Var x -> (x, args) :: l
+        | Formula.Var x -> (x, args) :: l
         | _ -> l
       ) [] (typ res)
 end

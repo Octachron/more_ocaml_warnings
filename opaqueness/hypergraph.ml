@@ -1,64 +1,14 @@
 let debug fmt = Format.fprintf Format.err_formatter
     ("@[debug:@ " ^^ fmt ^^ "@]@.")
 
-type vertex = Ident.t
-
-type 'a formula =
-  | And of 'a formula list
-  | Var of 'a
-  | Or of 'a formula list
-  | True
-  | False
-
-let const s ppf = Format.fprintf ppf "%(%)" s
-let sep s ppf () = const s ppf
-
-let rec pp_formula var ppf = function
-  | And l -> Format.fprintf ppf "@[[%a]@]"
-               (pp_list var @@ format_of_string "∧") l
-  | Or l -> Format.fprintf ppf "@[[%a]@]" (pp_list var "∨") l
-  | True -> const "true" ppf
-  | False -> const "false" ppf
-  | Var x -> var ppf x
-and pp_list var s =
-  Format.pp_print_list ~pp_sep:(sep @@ "@ "^^ s ^^"@ ") (pp_formula var)
-let pp_ident ppf id = Format.fprintf ppf "%s" (Ident.name id)
-let pp_edge = pp_formula pp_ident
-
-
-let rec simplify assign = function
-  | True | False as x -> x
-  | And [] | Or [] -> True
-  | And [x] -> simplify assign x
-  | Or (Or l :: q ) -> simplify assign (Or (l @ q))
-  | And (And l :: q) -> simplify assign (And (l @ q))
-  | Or [x] -> simplify assign x
-  | And l -> simplify_and assign [] l
-  | Or l -> simplify_or assign [] l
-  | Var x as v ->
-    match assign x with
-    | None -> v
-    | Some x -> x
-and simplify_list e zero constr f rest  = function
-  | [] -> if rest = [] then e else constr rest
-  | x :: q ->
-    let x = simplify f x in
-    if x = zero then zero
-    else if x = e then simplify_list e zero constr f (rest) q
-    else simplify_list e zero constr f (x::rest) q
-and simplify_and f = simplify_list True False (fun x -> And x) f
-and simplify_or f = simplify_list False True (fun x -> Or x) f
-
-let simplify f x =
-  let y = simplify f x in
-  debug "[%a] => [%a]" pp_edge x pp_edge y;
+let capture pp f x =
+  let y = f x in
+  debug "%a => %a" pp x pp y;
   y
 
-let simplif = simplify (fun _ -> None)
-let ( %=% ) value lit = simplify (fun x -> if x = value then Some lit else None)
+type vertex = Ident.t
 
-
-type edge = Ident.t formula
+type edge = Ident.t Formula.t
 type status =
   | Unknown
   | Connected
@@ -79,6 +29,9 @@ let add_edge_simple v edge tbl =
       { info with status = max Connected info.status;
                   edges =  edge :: info.edges }
 
+let pp_ident ppf id = Format.fprintf ppf "%s" (Ident.name id)
+let pp_edge = Formula.pp pp_ident
+
 let rec remove_vertices vs tbl =
   match vs with
   | [] -> ()
@@ -86,9 +39,10 @@ let rec remove_vertices vs tbl =
     Hashtbl.remove tbl v;
     let stack = ref q in
     Hashtbl.filter_map_inplace (fun _w info ->
-        let edges = List.map (v %=% True) info.edges in
+        let simplify = capture pp_edge Formula.(v %=% True) in
+        let edges = List.map simplify info.edges in
         if info.status = Connected
-        && List.exists ( (=) True ) edges then
+        && List.exists ( (=) Formula.True ) edges then
           (stack := v :: !stack; None)
         else Some { info with edges }
       ) tbl;
@@ -96,17 +50,17 @@ let rec remove_vertices vs tbl =
 
 let add_edge tbl vertex edge =
   debug "Add edge:[%a]" pp_edge edge;
-  if edge = True then remove_vertices [vertex] tbl
+  if edge = Formula.True then remove_vertices [vertex] tbl
   else add_edge_simple vertex edge tbl
 
 let add_arrow (res,ls) graph =
-  let ls = simplify
+  let ls = capture pp_edge (Formula.simplify
       (fun arg ->
          if Hashtbl.mem graph arg then None
          else Some True
-      ) (And ls) in
+      )) (And ls) in
   if Hashtbl.mem graph res then
-    add_edge graph res (simplif ls);
+    add_edge graph res (capture pp_edge Formula.simplif ls);
 
 type view = { graph:t; mutable vertices: (Location.t * vertex) list }
 

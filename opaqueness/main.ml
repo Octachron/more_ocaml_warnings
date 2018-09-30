@@ -141,13 +141,13 @@ module TypesIter = struct
         State.mutate (Hypergraph.add_abstract loc id)
       )
 
-  let item env = function
+  let item loc env = function
     | Sig_value (id, vd) ->
       debug "Types.val";
       value_description env  id vd.val_type
     | Sig_type (id,td,_) ->
       debug "Types.type";
-      decl id td.type_loc (td.type_kind=Type_abstract) td.type_manifest
+      decl id loc (td.type_kind=Type_abstract) td.type_manifest
     | Sig_typext _ ->  ()
 
     | Sig_module _ -> ()
@@ -155,7 +155,7 @@ module TypesIter = struct
     | Sig_class _ -> ()
     | Sig_class_type _ -> ()
 
-  let signature env s =  List.iter (item env) s
+  let signature env loc s =  List.iter (item loc env) s
 
 end
 
@@ -163,13 +163,13 @@ module Arg = struct
 
   include TypedtreeIter.DefaultIteratorArgument
 
-  let scrape env ty =
+  let scrape env loc ty =
     debug "scrape";
     let ty = Env.scrape_alias env  ty in
     begin match ty with
       | Mty_signature s ->
         debug "scrape successful";
-        TypesIter.signature env s
+        TypesIter.signature env loc s
       | _ -> ()
     end
 
@@ -179,7 +179,7 @@ module Arg = struct
       enter_signature_item s
     | Tsig_module  m  ->
       State.push m.md_id m.md_loc ();
-      scrape s.sig_env m.md_type.mty_type
+      scrape s.sig_env s.sig_loc m.md_type.mty_type
     | _ -> enter_signature_item s
 
 

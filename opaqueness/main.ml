@@ -175,10 +175,10 @@ module Arg = struct
 
   let enter_signature_item s = match s.sig_desc with
     | Tsig_module ({md_type = { mty_desc = Tmty_signature _; _}; _ } as m)  ->
-      State.push m.md_id m.md_loc ();
+      State.push ~id:m.md_id m.md_loc ();
       enter_signature_item s
     | Tsig_module  m  ->
-      State.push m.md_id m.md_loc ();
+      State.push ~id:m.md_id m.md_loc ();
       scrape s.sig_env s.sig_loc m.md_type.mty_type
     | _ -> enter_signature_item s
 
@@ -211,31 +211,29 @@ module Arg = struct
       warn last.loc (Hypergraph.unreachable last.view.graph)
     | _ -> ()
 
-  (*
   let enter_module_expr modexp =
     let env = modexp.mod_env in
     match modexp.mod_desc with
     | Tmod_constraint (_, _, Tmodtype_explicit ty , _) ->
       begin match ty.mty_desc with
-        | Tmty_signature _ -> push modexp.mod_loc ()
-        | _ -> scrape modexp.mod_loc env ty.mty_type
+        | Tmty_signature _ -> State.push modexp.mod_loc ()
+        | _ -> scrape env modexp.mod_loc ty.mty_type
       end
     | Tmod_constraint (_,_, Tmodtype_implicit , _) ->
-      push modexp.mod_loc
+      State.push modexp.mod_loc ()
     | _ -> ()
 
   let leave_module_expr modexp =
     match modexp.mod_desc with
     |  Tmod_constraint _ ->
       debug "Leaving";
-      begin match pop () with
+      begin match State.pop () with
         | None -> debug "Nested?"
         | Some x ->
-          let unreachable = Hypergraph.unreachable x.graph in
+          let unreachable = Hypergraph.unreachable x.view.graph in
           warn modexp.mod_loc unreachable
       end
     | _ -> ()
-*)
 
 
   let enter_type_declaration (tyd:type_declaration) =

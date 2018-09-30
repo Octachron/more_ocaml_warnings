@@ -2,7 +2,7 @@ let debug fmt = Format.fprintf Format.err_formatter
     ("@[debug:@ " ^^ fmt ^^ "@]@.")
 
 type info =
-  { id: Ident.t;
+  { id: Ident.t option;
     loc: Location.t;
     view: Hypergraph.view
   }
@@ -19,7 +19,7 @@ let cons x = Data.state := x :: get ()
 
 let init id loc =
   let view = Hypergraph.{ graph = init (); vertices = []} in
-  set [Signature {id;loc;view} ]
+  set [Signature {id= Some id;loc;view} ]
 
 
 let _update f = match get () with
@@ -48,8 +48,9 @@ let pop () =
       debug "pop: mt %d" (List.length q );
       None
 
-let push id loc () =
-  debug "Entering analysis: %s |%d+1" (Ident.name id) (List.length @@ get ());
+let push ?id loc () =
+  let name = match id with None -> "?" | Some id -> Ident.name id in
+  debug "Entering analysis: %s |%d+1" name (List.length @@ get ());
   match get () with
   | x :: _ ->
     let graph = match x with

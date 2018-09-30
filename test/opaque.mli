@@ -1,77 +1,98 @@
-type t
-type w
-type r
-type u
+module Basic: sig
 
-val (+): t -> t -> t
-val f: int -> r
-val g: w -> t
-val h: r -> int -> u
+  type t
+  type w
+  type r
+  type u
 
-type odd
-type even
-
-val a: odd -> even
-val b: even -> odd
-
-module type s = sig
-  type ok
-  module M: sig type bad end
+  val (+): t -> t -> t
+  val f: int -> r
+  val g: w -> t
+  val h: r -> int -> u
 end
 
-module type c = sig type t end
+module TwoCycle: sig
+  type odd
+  type even
+  val a: odd -> even
+  val b: even -> odd
+end
 
-module M: c
+module Module_types: sig
+  module type s = sig
+    type ok
+    module M: sig type bad end
+  end
 
-type t1 and t2
+  module type c = sig type t end
 
-val f: unit -> t1 * t2
+  module M: c
 
-type 'a producer = unit -> 'a
+  module type r = sig type invi end
+  module F: r with type invi := int
+end
 
-type produced
+module Composite_1: sig
+  type t1 and t2
 
-val x: produced producer
+  val f: unit -> t1 * t2
 
-type after_or
+  type 'a producer = unit -> 'a
+  type produced
 
-val f: [ `X of int | `Y of after_or ]
-  -> [`W of float | `Z of after_or * char] -> after_or
+  val x: produced producer
+end
 
-type lock1 and lock2
-val f: [ `X of lock1 | `Y of lock2 ] -> lock1 * lock2
+module Polyvariants: sig
+  type after_or
 
-type field
-type field2
+  val f: [ `X of int | `Y of after_or ]
+    -> [`W of float | `Z of after_or * char] -> after_or
+
+  type lock1 and lock2
+  val f: [ `X of lock1 | `Y of lock2 ] -> lock1 * lock2
+end
+
+module Objects: sig
+  type field
+  type field2
 
 val x: int -> <x:field>
 val w: <x:field2> -> field2
+end
 
-type inner and inner_ok
-val fi: ( (unit -> inner) -> inner) -> inner
-val fi: ( (unit -> inner_ok) -> unit) -> inner_ok
+module Inner: sig
+  type inner and inner_ok
+  val fi: ( (unit -> inner) -> inner) -> inner
+  val fi: ( (unit -> inner_ok) -> unit) -> inner_ok
+end
 
-type either_ok and either
+module Typedecl: sig
+  type either_ok and either
 
-val either: (either_ok, bool) result -> either_ok
-val either' : (either, either) result -> either
+  val either: (either_ok, bool) result -> either_ok
+  val either' : (either, either) result -> either
 
-type ('a,'b) re = { x: 'a; y: 'b }
-type prod
-val prod: (prod, int) re -> prod
+  type ('a,'b) re = { x: 'a; y: 'b }
+  type prod
+  val prod: (prod, int) re -> prod
+end
 
-type recursive
-val f: (recursive, recursive) result -> recursive
+module Rectypes: sig
+  type recursive
+  val f: (recursive, recursive) result -> recursive
 
-type recursive_ok
-val f: (recursive_ok, recursive_ok list) result -> recursive_ok
+  type recursive_ok
+  val f: (recursive_ok, recursive_ok list) result -> recursive_ok
 
-module type r = sig type invi end
-module F: r with type invi := int
+  type 'a unregular = Leaf of 'a | Node of ('a * 'a) unregular
+  type unreg
+  val f: unreg unregular -> unreg
 
-type 'a unregular = Leaf of 'a | Node of ('a * 'a) unregular
-type unreg
-val f: unreg unregular -> unreg
+end
 
-type maybe_not
-val f: (maybe_not, int) result
+
+module Iff : sig
+  type maybe_not
+  val f: (maybe_not, int) result
+end

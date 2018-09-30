@@ -96,19 +96,21 @@ module Extract = struct
 
   and deconstruct (visited: _ list) (env:Env.t) params tyd =
     let back = Btype.snapshot () in
-    List.iter2 (fun x y -> Ctype.unify env x y) params tyd.type_params;
     let f =
-      match tyd.type_kind with
-      | Type_record (l,_) -> labels visited env l
-      | Type_variant l ->
-        let constr (x:constructor_declaration) =
-          debug "constructor: %a" pp_ident x.cd_id;
-          echo "arg, " Hypergraph.pp_edge @@
-            match x.cd_args with
-            | Cstr_tuple t -> Formula.all (t >>= typ visited env)
-            | Cstr_record ld-> labels visited env ld in
-        Formula.any (List.map constr l)
-      | Type_abstract | Type_open -> True in
+      try begin
+        List.iter2 (fun x y -> Ctype.unify env x y) params tyd.type_params;
+          match tyd.type_kind with
+          | Type_record (l,_) -> labels visited env l
+          | Type_variant l ->
+            let constr (x:constructor_declaration) =
+              debug "constructor: %a" pp_ident x.cd_id;
+              echo "arg, " Hypergraph.pp_edge @@
+              match x.cd_args with
+              | Cstr_tuple t -> Formula.all (t >>= typ visited env)
+              | Cstr_record ld-> labels visited env ld in
+            Formula.any (List.map constr l)
+          | Type_abstract | Type_open -> True
+        end with Ctype.Unify _ -> False in
     Btype.backtrack back;
     debug "Deconstructing to %a" Hypergraph.pp_edge f;
     f

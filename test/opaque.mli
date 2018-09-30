@@ -65,3 +65,10 @@ val f: (recursive, recursive) result -> recursive
 
 type recursive_ok
 val f: (recursive_ok, recursive_ok list) result -> recursive_ok
+
+module type r = sig type invi end
+module F: r with type invi := int
+
+type 'a unregular = Leaf of 'a | Node of ('a * 'a) unregular
+type unreg
+val f: unreg unregular -> unreg

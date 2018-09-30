@@ -72,3 +72,6 @@ module F: r with type invi := int
 type 'a unregular = Leaf of 'a | Node of ('a * 'a) unregular
 type unreg
 val f: unreg unregular -> unreg
+
+type maybe_not
+val f: (maybe_not, int) result

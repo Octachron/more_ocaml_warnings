@@ -121,10 +121,8 @@ module Extract = struct
   let arrow_typ env ty =
     let r = arrow true env ty in
     let args = r.args >>= typ [] env in
-    List.fold_left (fun l -> function
-        | Formula.Var x -> (x, args) :: l
-        | _ -> l
-      ) [] (typ [] env r.res)
+    List.map (fun implied -> (implied, args) )
+    @@ Formula.(iff @@ all @@ typ [] env r.res)
 end
 
 module TypesIter = struct

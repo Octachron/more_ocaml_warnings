@@ -75,3 +75,16 @@ let rec free = function
   | Var x -> [x]
   | True | False -> []
   | And l | Or l -> Utils.bind free l
+
+
+type 'a set = (module Set.S with type elt = 'a)
+let make_iff (type elt) ((module S): elt set): elt t -> elt list  =
+  let rec iff = function
+  | False | True | Or [] -> S.empty
+  | Var x -> S.singleton x
+  | And x -> List.fold_left (fun s x -> S.union (iff x) s) S.empty x
+  | Or (x::q) ->
+    List.fold_left (fun s x -> S.inter s (iff x)) (iff x) q in
+  fun f -> S.elements (iff f)
+
+let iff = make_iff (module Ident.Set)

@@ -20,27 +20,40 @@ let print_main ppf =
       "@[@{<warning>Warning [opaqueness]:@}@ \
        some abstract types cannot be constructed@]@,"
 
+type subwarning =
+  { start: Location.t; locs: Location.t list; component : Digraph.component }
 
 let with_warning printer ppf x= Format.fprintf ppf "@{<warning>%a@}" printer x
-let print_sub locs ppf component =
-  let pp_ident = with_warning pp_ident in
-  let p x = Format.fprintf ppf x in
+
+let extract_subwarning locs component =
   let ids = match component with
     | Digraph.No_loop id -> [id]
     | Has_loop x -> x in
-  List.iter (fun id -> Location.print ppf @@ Ident.Map.find id locs) ids;
-  match component with
+  let locs =
+    List.sort compare @@ List.map (fun id -> Ident.Map.find id locs) ids in
+  let start = List.hd locs in
+  { start; locs; component }
+
+let subcompare x y = compare x.start y.start
+let print_sub ppf sub =
+  let pp_ident = with_warning pp_ident in
+  let p x = Format.fprintf ppf x in
+  List.iter (Location.print ppf) sub.locs;
+  match sub.component with
    | Digraph.No_loop id -> p "Type %a is never built by a function." pp_ident id
    | Has_loop [id]  -> p "Type %a depends on itself." pp_ident id
    | Has_loop l ->
      p "@[All types in the set@ {%a}@ depends on another type in this set@]"
             (Format.pp_print_list ~pp_sep:(sep ";@ ") pp_ident) l
 
-let print_subs locs =
+let print_subs =
   Format.pp_print_list
     ~pp_sep:(fun ppf () -> Format.fprintf ppf "@,")
-    (print_sub locs)
+    print_sub
 
 let warning l =
-  Format.eprintf "@[<v>%t%a@]@." print_main (print_subs @@ locs l)
-    (components l)
+  let subs =
+    List.sort subcompare
+    @@ List.map (extract_subwarning @@ locs l)
+    @@ components l in
+  Format.eprintf "@[<v>%t%a@]@." print_main print_subs subs

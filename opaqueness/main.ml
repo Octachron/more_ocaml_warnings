@@ -87,7 +87,9 @@ module Extract = struct
 
     (* not yet implemented *)
     (*| Tobject _ -> []  ? *)
-    | Tpackage _ -> []
+    | Tpackage (p,_nl,_) ->
+      let modtypedecl = Env.find_modtype p env in
+      modtype visited env modtypedecl.mtd_type
 
   and row_field visited env (_, r) = match r with
     | Rpresent (Some t) -> [Formula.all (typ visited env t)]
@@ -115,6 +117,26 @@ module Extract = struct
     debug "Deconstructing to %a" Hypergraph.pp_edge f;
     f
 
+  and modtype  visited env = function
+      | None -> []
+      | Some mtd ->
+        begin match Env.scrape_alias env mtd with
+          | Mty_signature s -> bind (signature_item visited env) s
+          | _ -> []
+        end
+  and signature_item visited env = function
+    | Sig_value (_,v) -> typ visited env v.val_type
+    | Sig_module (_,md,_) -> modtype visited env (Some md.md_type)
+
+    (* not implemented *)
+    | Sig_class _ -> []
+
+    (* *)
+    | Sig_class_type _ -> []
+    | Sig_modtype _ -> []
+    | Sig_typext _ -> []
+    | Sig_type _ -> []
+
   and labels visited env l =
     Formula.all (bind (fun x -> typ visited env x.ld_type) l)
 
@@ -141,7 +163,7 @@ module TypesIter = struct
         State.mutate (Hypergraph.add_abstract loc id)
       )
 
-  let item loc env = function
+  let rec item loc env = function
     | Sig_value (id, vd) ->
       debug "Types.val";
       value_description env  id vd.val_type
@@ -150,12 +172,19 @@ module TypesIter = struct
       decl id loc (td.type_kind=Type_abstract) td.type_manifest
     | Sig_typext _ ->  ()
 
-    | Sig_module _ -> ()
-    | Sig_modtype _ -> ()
+    | Sig_module (_,md,_) -> modtype env loc md.md_type
+
+    (* not implemented *)
     | Sig_class _ -> ()
+
+    (* Type level only *)
+    | Sig_modtype _ -> ()
     | Sig_class_type _ -> ()
 
-  let signature env loc s =  List.iter (item loc env) s
+  and modtype env loc s =
+    match Env.scrape_alias env s with
+    | Mty_signature s -> List.iter (item loc env) s
+    | _ -> ()
 
 end
 
@@ -163,23 +192,13 @@ module Arg = struct
 
   include TypedtreeIter.DefaultIteratorArgument
 
-  let scrape env loc ty =
-    debug "scrape";
-    let ty = Env.scrape_alias env  ty in
-    begin match ty with
-      | Mty_signature s ->
-        debug "scrape successful";
-        TypesIter.signature env loc s
-      | _ -> ()
-    end
-
   let enter_signature_item s = match s.sig_desc with
     | Tsig_module ({md_type = { mty_desc = Tmty_signature _; _}; _ } as m)  ->
       State.push ~id:m.md_id m.md_loc ();
       enter_signature_item s
     | Tsig_module  m  ->
       State.push ~id:m.md_id m.md_loc ();
-      scrape s.sig_env s.sig_loc m.md_type.mty_type
+      TypesIter.modtype s.sig_env s.sig_loc m.md_type.mty_type
     | _ -> enter_signature_item s
 
 
@@ -217,7 +236,7 @@ module Arg = struct
     | Tmod_constraint (_, _, Tmodtype_explicit ty , _) ->
       begin match ty.mty_desc with
         | Tmty_signature _ -> State.push modexp.mod_loc ()
-        | _ -> scrape env modexp.mod_loc ty.mty_type
+        | _ -> TypesIter.modtype env modexp.mod_loc ty.mty_type
       end
     | Tmod_constraint (_,_, Tmodtype_implicit , _) ->
       State.push modexp.mod_loc ()

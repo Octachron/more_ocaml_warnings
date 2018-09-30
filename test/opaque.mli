@@ -96,3 +96,9 @@ module Iff : sig
   type maybe_not
   val f: (maybe_not, int) result
 end
+
+module Packed: sig
+  type p
+  module type s = sig val x: p end
+  val f: (module s) -> p
+end

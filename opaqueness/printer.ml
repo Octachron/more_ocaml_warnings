@@ -14,11 +14,18 @@ let components l =
 let locs l =
   List.fold_left (fun m (loc,k,_) -> Ident.Map.add k loc m) Ident.Map.empty l
 
-let print_main ppf =
+let print_ctx ppf = function
+  | None -> Format.fprintf ppf "Some abstract types cannot be built"
+  | Some id ->
+    Format.fprintf ppf "In module %a,@ some abstract types cannot be built"
+      pp_ident id
+
+let print_main ppf (loc, ctx) =
     Misc.Color.setup !Clflags.color;
     Format.fprintf ppf
-      "@[@{<warning>Warning [opaqueness]:@}@ \
-       some abstract types cannot be constructed@]@,"
+      "%a@[@{<warning>Warning [opaqueness]:@}@ %a@]@,"
+      Location.print loc
+      print_ctx ctx
 
 type subwarning =
   { start: Location.t; locs: Location.t list; component : Digraph.component }
@@ -51,9 +58,9 @@ let print_subs =
     ~pp_sep:(fun ppf () -> Format.fprintf ppf "@,")
     print_sub
 
-let warning l =
+let warning loc ctx l =
   let subs =
     List.sort subcompare
     @@ List.map (extract_subwarning @@ locs l)
     @@ components l in
-  Format.eprintf "@[<v>%t%a@]@." print_main print_subs subs
+  Format.eprintf "@[<v>%a%a@]@." print_main (loc,ctx) print_subs subs

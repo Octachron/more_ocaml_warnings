@@ -16,11 +16,11 @@ module type arg = sig
   include TypedtreeIter.IteratorArgument
 end
 
-let warn _loc = function
+let warn loc ctx = function
   | [] -> ()
-  | l -> Printer.warning l
+  | l -> Printer.warning loc ctx l
 
-let early_warning loc {Hypergraph.graph; vertices} =
+let early_warning loc ctx {Hypergraph.graph; vertices} =
   let early acc (loc,id) =
     if Hashtbl.mem graph id then begin
       Hypergraph.mark id graph;
@@ -28,7 +28,7 @@ let early_warning loc {Hypergraph.graph; vertices} =
     end
     else
       acc in
-  List.fold_left early [] vertices |> warn loc
+  List.fold_left early [] vertices |> warn loc ctx
 
 
 
@@ -191,9 +191,9 @@ module Arg = struct
 
   let warning h =
     if last () then
-      warn h.State.loc (Hypergraph.unreachable h.view.Hypergraph.graph)
+      warn h.State.loc h.id (Hypergraph.unreachable h.view.graph)
     else
-      early_warning h.loc h.view
+      early_warning h.loc h.id h.view
 
   let leave_signature_item s =
     match s.sig_desc with
@@ -208,7 +208,7 @@ module Arg = struct
 
   let leave_signature _ = match State.get () with
     | [Signature last] ->
-      warn last.loc (Hypergraph.unreachable last.view.graph)
+      warn last.loc last.id (Hypergraph.unreachable last.view.graph)
     | _ -> ()
 
   let enter_module_expr modexp =
@@ -231,7 +231,7 @@ module Arg = struct
         | None -> debug "Nested?"
         | Some x ->
           let unreachable = Hypergraph.unreachable x.view.graph in
-          warn modexp.mod_loc unreachable
+          warn modexp.mod_loc None unreachable
       end
     | _ -> ()
 

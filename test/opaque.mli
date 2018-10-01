@@ -133,4 +133,7 @@ module Fun: sig
   type g
   module G: sig val x: g end -> sig val x: g end
 
+  type h
+  module H: sig val x: h end -> sig val x:h end ->  sig val x: h end
+
 end

@@ -221,8 +221,18 @@ and modtype exit ctx state = function
       | Mty_signature s ->
         let arrows = signature true exit ctx state.abstracts s in
         merge state arrows
-      | _ -> state
+      | Mty_functor (_,x,y) -> functor' ctx state x y
+      | Mty_ident _ | Mty_alias _ -> state
     end
+
+and functor' ctx state x y =
+  let arg =  modtype false ctx state x in
+  let res = modtype false ctx state (Some y) in
+  let f = all arg.arrows |- all res.arrows in
+  close ctx.loc ctx.id { res with arrows = [f] };
+  { state with arrows = f :: state.arrows }
+
+
 and module_type ctx state _id mt =
   let () =
     ignore @@
@@ -300,12 +310,7 @@ and tmodtype arrow_only exit ctx state = function
         | Mty_signature s ->
           let arrows = signature arrow_only exit ctx state.abstracts s in
           merge state arrows
-        | Mty_functor (_, x, y ) ->
-          let arg =  modtype false ctx state x in
-          let res = modtype false ctx state (Some y) in
-          let f = all arg.arrows |- all res.arrows in
-          close ctx.loc ctx.id { res with arrows = [f] };
-          { state with arrows = f :: state.arrows }
+        | Mty_functor (_, x, y ) -> functor' ctx state x y
         | Mty_ident _ | Mty_alias _ -> state
       end
 

@@ -124,3 +124,13 @@ module Incl: sig
   module type s = sig type t end
   module M: sig include s end
 end
+
+module Fun: sig
+
+  type e_ok
+  module F: sig end -> sig val x: e_ok end
+
+  type g
+  module G: sig val x: g end -> sig val x: g end
+
+end

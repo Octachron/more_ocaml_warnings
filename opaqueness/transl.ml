@@ -113,13 +113,14 @@ let assign_all state =
     state.ids []
 
 
-let rec signature arrow_only exit ctx abstracts (s:signature) =
-  let result = thread ctx (unknown abstracts) sig_item s in
-  begin if exit then
+let close loc id result =
     let result = simplify result in
     if not (VMap.is_empty result.ids) then
-      Printer.warning ctx.loc ctx.id (assign_all result);
-  end;
+      Printer.warning loc id (assign_all result)
+
+let rec signature arrow_only exit ctx abstracts (s:signature) =
+  let result = thread ctx (unknown abstracts) sig_item s in
+  if exit then close ctx.loc ctx.id result;
   if arrow_only then arrows result.arrows else result
 
 and sig_item ctx state  = function
@@ -299,7 +300,13 @@ and tmodtype arrow_only exit ctx state = function
         | Mty_signature s ->
           let arrows = signature arrow_only exit ctx state.abstracts s in
           merge state arrows
-        | _ -> state
+        | Mty_functor (_, x, y ) ->
+          let arg =  modtype false ctx state x in
+          let res = modtype false ctx state (Some y) in
+          let f = all arg.arrows |- all res.arrows in
+          close ctx.loc ctx.id { res with arrows = [f] };
+          { state with arrows = f :: state.arrows }
+        | Mty_ident _ | Mty_alias _ -> state
       end
 
 and tmodule_type ctx state mt =

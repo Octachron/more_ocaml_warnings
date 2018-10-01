@@ -102,3 +102,20 @@ module Packed: sig
   module type s = sig val x: p end
   val f: (module s) -> p
 end
+
+module Implies: sig
+
+
+  type implied_ok
+  val f: ((unit -> implied_ok) ->  implied_ok) -> implied_ok
+
+end
+
+module Classes: sig
+
+  type m
+  class c: m -> object method m:m method k: unit -> m end
+
+  type n_ok
+  class u: object method u:n_ok end
+end

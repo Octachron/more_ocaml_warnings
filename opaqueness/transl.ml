@@ -96,6 +96,8 @@ type ctx = {
   env: Env.t
 }
 
+let local ctx state : loc_state =
+  { env= ctx.env; visited = []; unknowns = state.abstracts }
 let pp_arrow = Formula.pp pp_ident
 
 let assign_all state =
@@ -132,10 +134,7 @@ and sig_item ctx state  = function
   | Sig_class (_,cd,_) -> class' ctx state cd
 
 and value ctx state ty =
-  let x =
-    typ
-      {visited=[]; env = ctx.env; unknowns = state.abstracts }
-      ty in
+  let x = typ (local ctx state) ty in
   debug "val: %a" pp_arrow x;
   merge state @@ arrows [x]
 
@@ -239,7 +238,13 @@ and module' ctx state id md =
     { ctx with id=Some id; loc=md.md_loc} state (Some md.md_type)
 
 (*and modtype _state _vd = assert false*)
-and class' _ctx _state _vd = assert false
+and class' ctx state (c:class_declaration) =
+  merge state @@ arrows [ class_typ (local ctx state) c.cty_type ]
+
+and class_typ ls (x:class_type) = match x with
+  | Cty_arrow (_,ty, c) -> typ ls ty |- class_typ ls c
+  | Cty_constr (_,_,c) -> class_typ ls c
+  | Cty_signature cty -> typ ls cty.csig_self
 
 and labels ls l =
     reduce (&&&) (fun x -> typ ls x.ld_type) l
@@ -272,7 +277,7 @@ and tsig_item ctx state (si:signature_item)  =
 
   | Tsig_module m -> tmodule ctx state m
   | Tsig_modtype mt -> tmodule_type ctx state mt
-  | Tsig_class cd -> tclass ctx state cd
+  | Tsig_class cd -> thread ctx state tclass cd
 
   | Tsig_recmodule ml -> List.fold_left (tmodule ctx) state ml
 
@@ -302,8 +307,8 @@ and tmodule_type ctx state mt =
     ignore @@
     tmodtype false { ctx with id = None; loc = mt.mtd_loc } empty mt.mtd_type in
   state
-and tclass _ctx _state _mt = assert false
-
+and tclass ctx state (c:_ class_infos ) =
+  merge state @@ arrows [class_typ (local ctx state) c.ci_expr.cltyp_type]
 and include' _ctx _state _i = assert false
 
 let rec structure exit ctx abstracts (s:structure) =

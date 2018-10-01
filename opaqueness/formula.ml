@@ -38,7 +38,7 @@ and any  = function
 let rec (|-) x y = match x, y with
   | False, _ -> True
   | True, x -> x
-  | x, True -> x
+  | _x, True -> True
   | x, Implies(y,z) -> (x &&& y) |- z
   | Implies(x,y), z -> (x==>y) |- z
   | x, y -> Implies(x,y)

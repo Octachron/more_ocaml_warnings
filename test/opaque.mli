@@ -64,7 +64,7 @@ end
 module Inner: sig
   type inner and inner_ok
   val fi: ( (unit -> inner) -> inner) -> inner
-  val fi: ( (unit -> inner_ok) -> unit) -> inner_ok
+  val fi2: ( (unit -> inner_ok) -> unit) -> inner_ok
 end
 
 module Typedecl: sig

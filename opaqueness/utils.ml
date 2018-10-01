@@ -1,7 +1,7 @@
 let bind f l = List.fold_right (fun x acc -> (f x) @ acc) l []
 let ( >>= ) l f = bind f l
 
-let debug fmt = Format.fprintf Format.err_formatter
+let debug fmt = Format.ifprintf Format.err_formatter
     ("@[debug: @[" ^^ fmt ^^ "@]@]@.")
 
 

@@ -113,14 +113,14 @@ let assign_all state =
     state.ids []
 
 
-let rec signature exit ctx abstracts (s:signature) =
+let rec signature arrow_only exit ctx abstracts (s:signature) =
   let result = thread ctx (unknown abstracts) sig_item s in
   begin if exit then
     let result = simplify result in
     if not (VMap.is_empty result.ids) then
       Printer.warning ctx.loc ctx.id (assign_all result);
   end;
-  result.arrows
+  if arrow_only then arrows result.arrows else result
 
 and sig_item ctx state  = function
   | Sig_value (id,vd) -> debug"val %a" pp_ident id; value ctx state vd.val_type
@@ -218,7 +218,7 @@ and modtype exit ctx state = function
   | Some mtd ->
     begin match Env.scrape_alias ctx.env mtd with
       | Mty_signature s ->
-        let arrows = arrows @@ signature exit ctx state.abstracts s in
+        let arrows = signature true exit ctx state.abstracts s in
         merge state arrows
       | _ -> state
     end
@@ -261,7 +261,7 @@ let rec tsignature exit ctx abstracts (s:signature) =
       if not (VMap.is_empty result.ids) then
         Printer.warning ctx.loc ctx.id (assign_all result);
   end;
-  result.arrows
+  result
 
 and tsig_item ctx state (si:signature_item)  =
   let ctx = { ctx with env = si.sig_env } in
@@ -285,19 +285,19 @@ and tsig_item ctx state (si:signature_item)  =
   | Tsig_include i -> include' ctx state i
 
 and tmodule ctx state md =
-  tmodtype true
+  tmodtype true true
     { ctx with id=Some md.md_id; loc=md.md_loc}
     state (Some md.md_type)
-and tmodtype exit ctx state = function
+and tmodtype arrow_only exit ctx state = function
   | None -> state
   | Some mtd -> match mtd.mty_desc with
     | Tmty_signature s ->
-      let arrows = arrows @@ tsignature exit ctx state.abstracts s in
-      merge state arrows
+      let state' = tsignature exit ctx state.abstracts s in
+      merge state (if arrow_only then arrows state'.arrows else state')
     | _ ->
       begin match Env.scrape_alias ctx.env mtd.mty_type with
         | Mty_signature s ->
-          let arrows = arrows @@ signature exit ctx state.abstracts s in
+          let arrows = signature arrow_only exit ctx state.abstracts s in
           merge state arrows
         | _ -> state
       end
@@ -305,11 +305,15 @@ and tmodtype exit ctx state = function
 and tmodule_type ctx state mt =
   let () =
     ignore @@
-    tmodtype false { ctx with id = None; loc = mt.mtd_loc } empty mt.mtd_type in
+    tmodtype true false
+      { ctx with id = None; loc = mt.mtd_loc }
+      empty mt.mtd_type in
   state
 and tclass ctx state (c:_ class_infos ) =
   merge state @@ arrows [class_typ (local ctx state) c.ci_expr.cltyp_type]
-and include' _ctx _state _i = assert false
+and include' ctx state (i: _ include_infos) =
+  tmodtype false false { ctx with id = None; loc = i.incl_loc }
+    state (Some i.incl_mod)
 
 let rec structure exit ctx abstracts (s:structure) =
   let env = s.str_final_env in

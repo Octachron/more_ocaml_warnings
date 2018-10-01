@@ -119,3 +119,8 @@ module Classes: sig
   type n_ok
   class u: object method u:n_ok end
 end
+
+module Incl: sig
+  module type s = sig type t end
+  module M: sig include s end
+end

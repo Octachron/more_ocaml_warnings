@@ -356,7 +356,7 @@ and str_item ctx state (si:structure_item)  =
   | Tstr_module m -> smodule ctx state m
   | Tstr_modtype mt -> tmodule_type ctx state mt
   | Tstr_class cd ->
-    List.fold_left (fun state (x,_) -> sclass state x) state cd
+    thread ctx state class' @@ List.map (fun (x,_) -> x.ci_decl) cd
 
   | Tstr_recmodule ml -> List.fold_left (smodule ctx) state ml
 
@@ -364,9 +364,9 @@ and str_item ctx state (si:structure_item)  =
   | Tstr_eval _ -> state
   | Tstr_include i -> sinclude ctx state i
 
-and sclass _x _y = assert false
-and smodule _ctx _state _m = assert false
+and smodule ctx state m = module_expr ctx state m.mb_expr
 and sinclude _ctx _state _i = assert false
+and module_expr _ctx _state _me = assert false
 
 let signature ctx s = tsignature true ctx VSet.empty s
 let structure ctx s = structure true ctx VSet.empty s
